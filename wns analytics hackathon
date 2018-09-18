@@ -1,0 +1,256 @@
+#------------------------------Logistic Regression--------------------
+getwd()
+setwd("D:/R/R-3.4.4")
+library(ISLR)
+library(dplyr)
+library(e1071)
+library(ROCR)
+library(caTools)
+library(caret)
+
+traindata=read.csv("D:/wns hackathon/train_data.csv",stringsAsFactors = F,header = T)
+testdata=read.csv("D:/wns hackathon/test_data.csv",stringsAsFactors = F,header = T)
+# glimpse(traindata)
+# View(head(traindata,100))
+
+
+for(i in 1:14){
+  if(class(traindata[,i])=="character")
+  {
+    traindata[,i]=as.factor(traindata[,i])
+  }
+  
+}
+
+for(i in 1:14){
+  if(class(traindata[,i])=="integer")
+  {
+    traindata[,i]=as.numeric(traindata[,i])
+  }
+  
+}
+
+traindata = traindata %>% na.omit()
+# testdata = testdata %>% na.omit()
+
+
+levels(traindata$department)
+levels(traindata$region)
+levels(traindata$education)
+levels(traindata$gender)
+levels(traindata$recruitment_channel)
+
+set.seed(2)
+# s1=sample(1:nrow(bankfull),0.42862*nrow(bankfull))
+s=sample(1:nrow(traindata),0.70*nrow(traindata))
+# s1=sample(1:nrow(traindata),0.46345988888*nrow(traindata))
+rg_trainval=traindata[s,]
+rg_test=traindata[-s,]
+# rg_test1=traindata[s1,]
+
+library(car)
+for_vif=lm(is_promoted~.,data=rg_trainval,singular.ok=TRUE)
+summary(for_vif)
+sort(vif(for_vif),decreasing = T)
+
+
+for_vif=lm(is_promoted~.-region-recruitment_channel-education-gender-employee_id,data=rg_trainval,singular.ok = TRUE)
+summary(for_vif)
+sort(vif(for_vif),decreasing = T)
+
+rg_trainval = rg_trainval %>% 
+      select(-region,-education ,-recruitment_channel)
+
+glimpse(rg_trainval)
+fit_train=glm(is_promoted~.-employee_id-gender,data=rg_trainval,family="binomial")
+summary(fit_train)
+fit_train=step(fit_train)
+
+rg_trainval$score=predict(fit_train,newdata=rg_trainval,type = "response")
+real=rg_trainval$is_promoted
+cutoffs=round(seq(0,1,length=100),3)
+cutoff_data=data.frame(cutoff=999,KS=999)
+
+for(cutoff in cutoffs){
+  pred=as.numeric(rg_trainval$score>cutoff)
+  TP=sum(real==pred & real==1)
+  TN=sum(real==pred & real==0)
+  FP=sum(real!=pred & real==0)
+  FN=sum(real!=pred & real==1)
+  P=TP+FN
+  N=TN+FP
+  KS=(TP/P)-(FP/N)
+  cutoff_data=rbind(cutoff_data,c(cutoff,KS))
+}
+
+cutoff_data=cutoff_data[-1,]
+KS.cutoff=cutoff_data$cutoff[which.max(cutoff_data$KS)][1]
+
+rg_test$score=predict(fit_train,newdata=rg_test,type="response")
+
+rg_test$predicted=as.numeric(rg_test$score>KS.cutoff)
+testdata$score=predict(fit_train,newdata=testdata,type="response")
+testdata$predicted=as.numeric(testdata$score>KS.cutoff)
+
+# rg_test1$score=predict(fit_train,newdata=rg_test1,type="response")
+# 
+# rg_test1$predicted=as.numeric(rg_test1$score>KS.cutoff)
+
+
+write.csv(cbind(testdata$employee_id,testdata$predicted),file="wnshackathon_ispromoted.csv",row.names=F,col.names=c('employee_id','is_promoted'))
+
+
+table(rg_test$predicted,rg_test$is_promoted)
+caret::confusionMatrix(factor(rg_test$predicted), factor(rg_test$is_promoted))
+library(ROCR)
+library(caTools)
+library(caret)
+
+# names(rg_trainval)
+colAUC(rg_test$predicted,rg_test$is_promoted, plotROC=T)
+
+# rg_test<- rg_test %>%
+#   mutate(score=ifelse(score>0.1,"Yes","No"))
+
+# ------------------Decision Tree Approach-----------------------
+
+
+for(i in 1:13){
+  if(class(testdata[,i])=="character")
+  {
+    testdata[,i]=as.factor(testdata[,i])
+  }
+  
+}
+
+for(i in 1:13){
+  if(class(testdata[,i])=="integer")
+  {
+    testdata[,i]=as.numeric(testdata[,i])
+  }
+  
+}
+
+# testdata= testdata %>% 
+#           select(-region ,-education, -recruitment_channel)
+
+tree.pdl= tree(is_promoted~.-region -education -recruitment_channel-employee_id,data=rg_trainval,na.action=na.exclude)
+plot(tree.pdl)
+text(tree.pdl)
+summary(tree.pdl)
+
+# cvtree<- cv.tree(tree.pdl,FUN = prune.misclass)
+# summary(cvtree)
+
+rg_test$score=predict(tree.pdl,newdata=rg_test)
+rg_test$predicted=as.numeric(rg_test$score>KS.cutoff)
+# rg_test$score=predict(cvtree,newdata=rg_test,type="class")
+table(rg_test$predicted,rg_test$is_promoted)
+prop.table(table(rg_test$predicted,rg_test$is_promoted),1)
+
+testdata$score=predict(tree.pdl,newdata=testdata)
+testdata$predicted=as.numeric(testdata$score>KS.cutoff)
+
+write.csv(cbind(testdata$employee_id,testdata$predicted),file="wnshackathon_ispromoted.csv",row.names=F,col.names=c('employee_id','is_promoted'))
+# rg_test$score=predict(cvtree,newdata=rg_test,type="class")
+table(rg_test$predicted,rg_test$is_promoted)
+prop.table(table(rg_test$predicted,rg_test$is_promoted),1)
+#-------------------------------------------------------------------------------------------
+rg_trainval= rg_trainval %>% 
+            na.omit()
+names(rg_trainval)
+
+
+rg_test$score<- 0
+rg_trainval$score<- 0
+#install.packages("neuralnet")
+#library(neuralnet)
+
+# nn <- neuralnet(is_promoted ~ department +education+ no_of_trainings + age +
+#                   previous_year_rating +length_of_service + 
+#                   KPIs_met..80. +awards_won. + avg_training_score + score , data=rg_trainval, hidden=c(2,1), linear.output=TRUE)
+# nn$result.matrix
+# plot(nn)
+
+#glimpse(rg_trainval)
+#nn <- model.matrix(~is_promoted+ no_of_trainings + age +
+#                     previous_year_rating +length_of_service + 
+#                    KPIs_met..80. +awards_won. + avg_training_score,data=rg_trainval)
+
+#nn1 <- neuralnet(is_promoted ~  no_of_trainings + age +
+#                  previous_year_rating +length_of_service + 
+#                   KPIs_met..80. +awards_won. + avg_training_score,data = nn, hidden=c(2,1), err.fct="sse", 
+#                  linear.output=F, algorithm="backprop", threshold = 0.01, learningrate = 0.1, rep=3)
+
+#nn1$net.result
+#plot(nn1)
+
+#mypredict<-neuralnet::compute(nn1,testdata[,1:7],rep=1)$net.result
+
+# ----------------------------svm approach--------------------
+
+svm.model = svm(is_promoted~.-region-recruitment_channel-employee_id-gender,data=rg_trainval,kernel="linear",type="eps",cost=1,gamma=0.5)
+rg_trainval$score=predict(svm.model,newdata=rg_trainval,type = "response")
+real=rg_trainval$is_promoted
+cutoffs=round(seq(0,1,length=100),3)
+cutoff_data=data.frame(cutoff=999,KS=999)
+
+for(cutoff in cutoffs){
+  pred=as.numeric(rg_trainval$score>cutoff)
+  TP=sum(real==pred & real==1)
+  TN=sum(real==pred & real==0)
+  FP=sum(real!=pred & real==0)
+  FN=sum(real!=pred & real==1)
+  P=TP+FN
+  N=TN+FP
+  KS=(TP/P)-(FP/N)
+  cutoff_data=rbind(cutoff_data,c(cutoff,KS))
+}
+
+cutoff_data=cutoff_data[-1,]
+KS.cutoff=cutoff_data$cutoff[which.max(cutoff_data$KS)][1]
+
+rg_test$score<- 0
+rg_test$score=predict(svm.model,rg_test)
+rg_test$predicted=as.numeric(rg_test$score>KS.cutoff)
+ ?svm
+table(rg_test$predicted,rg_test$is_promoted)
+prop.table(table(rg_test$predicted,rg_test$is_promoted),1)
+
+testdata$score<- 0
+testdata$score=predict(svm.model,testdata,na.action = na.roughfix)
+testdata$predicted=as.numeric(testdata$score>KS.cutoff)
+
+
+colAUC (as.numeric(as.character(rg_test$predicted)),as.numeric(as.character(rg_test$is_promoted)), plotROC=T)
+confusionMatrix(rg_test$predicted,rg_test$is_promoted)
+
+
+write.csv(cbind(testdata$employee_id,testdata$predicted),file="wnshackathon_ispromoted.csv",row.names=F,col.names=c('employee_id','is_promoted'))
+
+
+# ---------------RandomForest approach--------------------------------------------------------------
+
+install.packages("randomForest")
+library(randomForest)
+rf.pdl=randomForest(is_promoted~.-region -education -recruitment_channel-employee_id,data=rg_trainval,na.action=na.exclude)
+# rf.pdl=randomForest(store~.-countyname-storecode-Areaname-countytownname-state_alpha-Id-sales0-sales1,data=rg_trainval,na.action=na.exclude)
+# rf.pdl=randomForest(store~.-population-sales0-sales1-sales2-sales3-sales4-Id-state_alpha,data=rg_trainval,na.action=na.exclude)
+# fit_rf
+
+
+testdata$score=predict(rf.pdl,newdata=testdata)
+testdata$predicted=as.numeric(testdata$score>KS.cutoff)
+# score=predict(rf.pdl,newdata= rg_test, type="prob")[,1]
+# write.csv(score,'storetest_y.csv',row.names = F)
+# write.csv(rg_test$store,'storetest_sample.csv',row.names = F)
+table(forest.pred.test,rg_test$store)
+prop.table(table(rg_test$store,forest.pred.test),1)
+importance(rf.pdl)
+varImpPlot(rf.pdl) 
+
+
+
+
+
+
